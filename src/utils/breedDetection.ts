@@ -1,54 +1,64 @@
 
-// This file would typically integrate with an actual ML model API
-// For now, we'll use a mock implementation
+import { pipeline } from '@huggingface/transformers';
 
 interface BreedResult {
   breed: string;
   confidence: number;
 }
 
-// Mock data for demonstration
-const dogBreeds: BreedResult[] = [
-  { breed: "Labrador Retriever", confidence: 0.92 },
-  { breed: "Golden Retriever", confidence: 0.88 },
-  { breed: "German Shepherd", confidence: 0.85 },
-  { breed: "Bulldog", confidence: 0.82 },
-  { breed: "Beagle", confidence: 0.78 },
-  { breed: "Poodle", confidence: 0.75 },
-];
+let classifier: any = null;
 
-const catBreeds: BreedResult[] = [
-  { breed: "Siamese", confidence: 0.94 },
-  { breed: "Persian", confidence: 0.89 },
-  { breed: "Maine Coon", confidence: 0.86 },
-  { breed: "Bengal", confidence: 0.83 },
-  { breed: "Ragdoll", confidence: 0.80 },
-  { breed: "British Shorthair", confidence: 0.77 },
-];
+const initializeClassifier = async () => {
+  if (!classifier) {
+    classifier = await pipeline(
+      'image-classification',
+      'onnx-community/mobilenetv4_conv_small.e2400_r224_in1k',
+      { device: 'cpu' }
+    );
+  }
+  return classifier;
+};
 
 export const detectBreed = async (
   imageFile: File
 ): Promise<{ results: BreedResult[]; petType: 'dog' | 'cat' }> => {
-  return new Promise((resolve) => {
-    // Simulate API call delay
-    setTimeout(() => {
-      // Randomly decide if it's a dog or cat for the demo
-      const isProbablyDog = Math.random() > 0.5;
-      
-      // Randomly shuffle and take top 3 breeds from the appropriate list
-      const breeds = isProbablyDog ? [...dogBreeds] : [...catBreeds];
-      
-      // Fisher-Yates shuffle algorithm
-      for (let i = breeds.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
-        [breeds[i], breeds[j]] = [breeds[j], breeds[i]];
-      }
-      
-      // Return top 3 results
-      resolve({
-        results: breeds.slice(0, 3),
-        petType: isProbablyDog ? 'dog' : 'cat'
-      });
-    }, 1500);
-  });
+  try {
+    const classifier = await initializeClassifier();
+    
+    // Convert File to URL for the model
+    const imageUrl = URL.createObjectURL(imageFile);
+    
+    // Get predictions from the model
+    const predictions = await classifier(imageUrl);
+    
+    // Process and filter predictions
+    const results = predictions
+      .filter((pred: any) => {
+        const label = pred.label.toLowerCase();
+        return label.includes('cat') || label.includes('dog');
+      })
+      .map((pred: any) => ({
+        breed: pred.label.split(',')[0], // Take first part of label
+        confidence: pred.score
+      }))
+      .slice(0, 3); // Take top 3 results
+
+    // Determine if it's a cat or dog based on highest confidence prediction
+    const topPrediction = predictions[0].label.toLowerCase();
+    const petType = topPrediction.includes('cat') ? 'cat' : 'dog';
+
+    // Clean up the URL
+    URL.revokeObjectURL(imageUrl);
+
+    return {
+      results: results.length > 0 ? results : [{ breed: 'Unknown', confidence: 0 }],
+      petType
+    };
+  } catch (error) {
+    console.error('Error detecting breed:', error);
+    return {
+      results: [{ breed: 'Detection failed', confidence: 0 }],
+      petType: 'dog' // Default fallback
+    };
+  }
 };
