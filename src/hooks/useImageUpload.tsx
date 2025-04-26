@@ -49,6 +49,12 @@ export const useImageUpload = () => {
       file: file
     });
     setIsLoading(false);
+    
+    // Notify user that the first detection might take longer
+    if (!window.modelInitialized) {
+      toast.info('First detection might take a few moments while the AI model loads');
+      window.modelInitialized = true;
+    }
   }, [imageData.imageUrl]);
 
   return {
