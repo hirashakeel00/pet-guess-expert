@@ -35,6 +35,77 @@ const initializeClassifier = async () => {
   return classifier;
 };
 
+// Comprehensive list of dog breeds the model can detect
+const DOG_BREEDS = [
+  'golden retriever', 'labrador retriever', 'german shepherd', 'beagle', 'bulldog',
+  'poodle', 'rottweiler', 'yorkshire terrier', 'boxer', 'siberian husky',
+  'chihuahua', 'dachshund', 'great dane', 'boston terrier', 'shih tzu',
+  'border collie', 'australian shepherd', 'cocker spaniel', 'french bulldog',
+  'mastiff', 'saint bernard', 'doberman', 'weimaraner', 'bloodhound',
+  'afghan hound', 'basset hound', 'brittany spaniel', 'chesapeake bay retriever',
+  'collie', 'english setter', 'irish setter', 'pointer', 'vizsla',
+  'whippet', 'borzoi', 'saluki', 'rhodesian ridgeback', 'norwegian elkhound',
+  'keeshond', 'schipperke', 'pomeranian', 'papillon', 'toy terrier',
+  'wire-haired fox terrier', 'lakeland terrier', 'sealyham terrier',
+  'airedale', 'cairn', 'australian terrier', 'dandie dinmont',
+  'border terrier', 'kerry blue terrier', 'irish terrier',
+  'norfolk terrier', 'norwich terrier', 'scottish terrier',
+  'tibetan terrier', 'silky terrier', 'soft-coated wheaten terrier',
+  'west highland white terrier', 'lhasa', 'flat-coated retriever',
+  'curly-coated retriever', 'nova scotia duck tolling retriever',
+  'sussex spaniel', 'irish water spaniel', 'kuvasz', 'schipperke'
+];
+
+// Comprehensive list of cat breeds the model can detect
+const CAT_BREEDS = [
+  'tabby', 'siamese', 'persian', 'egyptian cat', 'tiger cat',
+  'lynx', 'catamount', 'cougar', 'leopard', 'jaguar',
+  'cheetah', 'snow leopard', 'lion', 'tiger'
+];
+
+const isPetBreed = (label: string): boolean => {
+  const lowerLabel = label.toLowerCase();
+  
+  // Check for exact matches or partial matches
+  return DOG_BREEDS.some(breed => 
+    lowerLabel.includes(breed) || breed.includes(lowerLabel.split(',')[0].trim())
+  ) || CAT_BREEDS.some(breed => 
+    lowerLabel.includes(breed) || breed.includes(lowerLabel.split(',')[0].trim())
+  );
+};
+
+const determinePetType = (predictions: any[]): 'dog' | 'cat' => {
+  // Look through top predictions to determine pet type
+  for (const pred of predictions.slice(0, 5)) {
+    const label = pred.label.toLowerCase();
+    
+    // Cat indicators
+    if (CAT_BREEDS.some(breed => label.includes(breed))) {
+      return 'cat';
+    }
+    
+    // Dog indicators  
+    if (DOG_BREEDS.some(breed => label.includes(breed))) {
+      return 'dog';
+    }
+  }
+  
+  // Default to dog if unclear
+  return 'dog';
+};
+
+const cleanBreedName = (label: string): string => {
+  // Take first part before comma and clean it up
+  let breed = label.split(',')[0].trim();
+  
+  // Capitalize first letter of each word
+  breed = breed.split(' ').map(word => 
+    word.charAt(0).toUpperCase() + word.slice(1).toLowerCase()
+  ).join(' ');
+  
+  return breed;
+};
+
 export const detectBreed = async (
   imageFile: File
 ): Promise<{ results: BreedResult[]; petType: 'dog' | 'cat' }> => {
@@ -49,41 +120,24 @@ export const detectBreed = async (
     const predictions = await classifier(imageUrl);
     console.log('Raw predictions:', predictions);
     
-    // Process predictions - we need to be more flexible with labels since the model
-    // might not directly label as "cat" or "dog"
-    const petRelatedPredictions = predictions.filter((pred: any) => {
-      const label = pred.label.toLowerCase();
-      // Include common pet-related terms
-      return label.includes('cat') || 
-             label.includes('dog') || 
-             label.includes('retriever') || 
-             label.includes('shepherd') || 
-             label.includes('terrier') || 
-             label.includes('siamese') || 
-             label.includes('persian');
-    });
+    // Filter for pet-related predictions
+    const petRelatedPredictions = predictions.filter((pred: any) => 
+      isPetBreed(pred.label)
+    );
     
-    // If no pet-related predictions, use top predictions
+    // If we found pet-related predictions, use them. Otherwise, use top predictions
+    // as they might still be relevant (the model might use different naming)
     const resultsToUse = petRelatedPredictions.length > 0 
       ? petRelatedPredictions 
-      : predictions.slice(0, 3);
+      : predictions.slice(0, 5);
     
     const results = resultsToUse.map((pred: any) => ({
-      breed: pred.label.split(',')[0].trim(), // Take first part of label
+      breed: cleanBreedName(pred.label),
       confidence: pred.score
-    })).slice(0, 3); // Take top 3 results
+    })).slice(0, 5); // Take top 5 results for more options
     
-    // Determine if it's a cat or dog based on label analysis
-    // This is a simplified heuristic
-    const topPrediction = predictions[0].label.toLowerCase();
-    let petType: 'dog' | 'cat' = 'dog'; // Default to dog
-    
-    if (topPrediction.includes('cat') || 
-        topPrediction.includes('siamese') || 
-        topPrediction.includes('persian') || 
-        topPrediction.includes('tabby')) {
-      petType = 'cat';
-    }
+    // Determine pet type based on predictions
+    const petType = determinePetType(predictions);
     
     // Clean up the URL
     URL.revokeObjectURL(imageUrl);
